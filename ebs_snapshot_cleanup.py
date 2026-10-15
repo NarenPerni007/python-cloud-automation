@@ -4,6 +4,7 @@
 Keeps snapshots that are:
   - newer than --days
   - attached to a registered AMI
+  - shared with another account
   - tagged Keep=true
 
 Everything else gets deleted (or listed with --dry-run).
@@ -26,6 +27,15 @@ def ami_snapshot_ids(ec2):
                 if snap:
                     ids.add(snap)
     return ids
+
+
+def is_shared(ec2, snapshot_id):
+    """True if the snapshot is shared with another account (or public)."""
+    perms = ec2.describe_snapshot_attribute(
+        Attribute="createVolumePermission",
+        SnapshotId=snapshot_id,
+    ).get("CreateVolumePermissions", [])
+    return len(perms) > 0
 
 
 def tagged_keep(ec2, snapshot_id):
@@ -65,7 +75,9 @@ def main():
             if sid in in_use:
                 kept += 1
                 continue
-            # TODO: also skip snapshots shared with other accounts
+            if is_shared(ec2, sid):
+                kept += 1
+                continue
             if tagged_keep(ec2, sid):
                 kept += 1
                 continue
@@ -78,7 +90,7 @@ def main():
             deleted += 1
 
     print("---")
-    print("deleted: %d, kept (in use / tagged): %d, skipped (too new): %d"
+    print("deleted: %d, kept (in use / shared / tagged): %d, skipped (too new): %d"
           % (deleted, kept, skipped))
     if args.dry_run:
         print("dry-run: nothing changed. use --no-dry-run to apply.")
